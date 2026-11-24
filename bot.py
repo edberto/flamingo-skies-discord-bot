@@ -3,6 +3,8 @@
 - On start: creates any missing roles, categories and channels of the server layout (layout() below). Each game
   in GAMES gets a role named after it and a category only that role (plus its experts and staff) can see; Discord
   Onboarding hands out the game roles. Finds existing things by name and never edits or deletes anything.
+- Join-to-create voice (same as the clan bot): joining "Join me to create" in FLAMINGO SKIES or a game category
+  makes you your own room there (you can rename/limit it); it's deleted when the last person leaves.
 - #vesper-log: "Started, version ..." on every start, channels it created, auto-update problems, digest failures.
 - Nightly at 03:00 Asia/Jakarta: copies fs.db to backups/fs-<weekday>.db (keeps 7 days).
 - Every 5 min: public Roblox stats for each game -> one live "playing now" card in #playing-now,
@@ -17,6 +19,7 @@ import logging
 import os
 import sqlite3
 import subprocess
+import time
 from datetime import date, datetime, time as dtime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -70,6 +73,7 @@ def parse_games(raw):
 
 
 GAMES = parse_games(os.environ.get("GAMES", "Huss game:0"))
+HUB = "Join me to create"
 
 # "Admin privileges except the admin category": everything a moderator needs, but not Administrator
 # (Administrator would bypass the ADMIN category's lock). The bot must hold these itself to hand them out.
@@ -80,7 +84,7 @@ STAFF_PERMS = discord.Permissions(
     mention_everyone=True)
 BOT_PERMS = STAFF_PERMS | discord.Permissions(
     view_channel=True, send_messages=True, embed_links=True, attach_files=True, read_message_history=True,
-    send_messages_in_threads=True, create_public_threads=True)
+    send_messages_in_threads=True, create_public_threads=True, connect=True)  # connect: to move people into rooms
 
 
 def slug(name):
@@ -90,15 +94,16 @@ def slug(name):
 def layout(games):
     """[(category, who sees it, [(channel, kind, key)])]. Who: None = everyone, "admin" = admins only,
     a game name = that game's role, its experts, Moderator and Dev.
-    Kinds: text, readonly, news, forum, hidden (admins, Moderator and Dev only)."""
+    Kinds: text, readonly, news, forum, voice, hidden (admins, Moderator and Dev only)."""
     cats = [("FLAMINGO SKIES", None, [("announcements", "news", "announce"), ("playing-now", "readonly", "status"),
-                                       ("bot-commands", "text", None)]),
+                                       ("bot-commands", "text", None), (HUB, "voice", None)]),
             ("ADMIN", "admin", [("studio-stats", "text", "stats"), ("vesper-log", "text", "log")])]
     for game in games:
         cats.append((game.upper(), game, [("announcements", "news", f"announce:{game}"),
                                           ("media", "text", None), ("chat", "text", None), ("questions", "text", None),
                                           ("suggestions", "forum", None), ("bug-report", "forum", None),
-                                          ("top-suggestions", "hidden", None)]))  # staff only
+                                          ("top-suggestions", "hidden", None),  # staff only
+                                          (HUB, "voice", None)]))
     return cats
 
 
@@ -203,6 +208,7 @@ def running_version():
 def open_db(path=DB_PATH):
     db = sqlite3.connect(path)
     db.execute("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT)")
+    db.execute("CREATE TABLE IF NOT EXISTS rooms (channel_id INTEGER PRIMARY KEY, owner_id INTEGER)")
     return db
 
 
@@ -212,6 +218,7 @@ class FSBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
         self.db = open_db()
         self.http_session = None
+        self.last_room = {}  # member id -> when we last made them a room
 
     def get(self, k):
         row = self.db.execute("SELECT v FROM kv WHERE k=?", (k,)).fetchone()
@@ -233,7 +240,7 @@ class FSBot(discord.Client):
         Existing ones are found by name (bot channels also by saved/.env ID) and left exactly as they are."""
         notes, everyone = [], guild.default_role
         bot_can = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True,
-                                              send_messages_in_threads=True)
+                                              send_messages_in_threads=True, connect=True)
         hide, see = discord.PermissionOverwrite(view_channel=False), discord.PermissionOverwrite(view_channel=True)
         role = {}
         for name, perms, colour, hoist in roles(GAMES):
@@ -269,13 +276,15 @@ class FSBot(discord.Client):
                         ow = {everyone: hide, guild.me: bot_can, role["Moderator"]: see, role["Dev"]: see}
                     if kind == "forum":
                         ch = await guild.create_forum(name, category=cat, overwrites=ow, reason="Vesper setup")
+                    elif kind == "voice":
+                        ch = await guild.create_voice_channel(name, category=cat, overwrites=ow, reason="Vesper setup")
                     else:
                         news = kind == "news" and "COMMUNITY" in guild.features
                         ch = await guild.create_text_channel(name, category=cat, news=news, overwrites=ow,
                                                              reason="Vesper setup")
                         if kind == "news" and not news:
                             notes.append(f"#{name} is a normal channel: turn on Community, then make it an Announcement channel")
-                    notes.append(f"Created #{name} in {cat_name}")
+                    notes.append(f"Created {'' if kind == 'voice' else '#'}{name} in {cat_name}")
                 if key:
                     self.put(f"channel:{key}", ch.id)
         for note in notes:
@@ -380,9 +389,47 @@ class FSBot(discord.Client):
             notes = ["Couldn't finish the server layout: Vesper is missing a permission (see README, invite link), "
                      "or its role isn't at the top of the role list"]
             log.error(notes[0])
+        for (cid,) in self.db.execute("SELECT channel_id FROM rooms").fetchall():  # rooms emptied while we were down
+            ch = self.get_channel(cid)
+            if ch is None or not ch.members:
+                await self.drop_room(ch, cid)
         version = running_version()
         await self.bot_log("\n".join(["**Started**" + (f", version `{version}`" if version else "")]
                                      + [f"- {n}" for n in notes]))
+
+    # --- join-to-create voice rooms (ported from the clan bot) ------------------------------
+    def room_ids(self):
+        return {r[0] for r in self.db.execute("SELECT channel_id FROM rooms")}
+
+    async def on_voice_state_update(self, member, before, after):
+        if before.channel == after.channel or member.guild.id != GUILD_ID:
+            return
+        if before.channel and before.channel.id in self.room_ids() and not before.channel.members:
+            await self.drop_room(before.channel, before.channel.id)
+        hub = after.channel
+        if hub and hub.name == HUB and hub.category and hub.category.name in {c for c, _, _ in layout(GAMES)}:
+            # hub-hopping would make the bot create/delete channels nonstop and hit Discord's rate limits
+            if time.monotonic() - self.last_room.get(member.id, -60) < 15:
+                return await member.move_to(None)
+            self.last_room[member.id] = time.monotonic()
+            ow = dict(hub.category.overwrites)
+            ow[member] = discord.PermissionOverwrite(view_channel=True, connect=True, manage_channels=True)
+            room = await hub.category.create_voice_channel(f"{member.display_name}'s room"[:100], overwrites=ow)
+            self.db.execute("INSERT INTO rooms VALUES (?, ?)", (room.id, member.id))
+            self.db.commit()
+            try:
+                await member.move_to(room)
+            except discord.HTTPException:  # they left the hub before we could move them
+                await self.drop_room(room, room.id)
+
+    async def drop_room(self, ch, cid):
+        self.db.execute("DELETE FROM rooms WHERE channel_id=?", (cid,))
+        self.db.commit()
+        if ch is not None:
+            try:
+                await ch.delete(reason="empty join-to-create room")
+            except discord.NotFound:
+                pass
 
     async def update_status(self, games):
         channel = self.channel("status")

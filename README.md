@@ -14,6 +14,7 @@ Discord bot for the Flamingo Skies server. Runs on the same GCP e2-micro as the 
   In every `#announcements`, only admins, Moderator, Dev and Vesper can post. To add a game later, add it to `GAMES` and restart.
 
   Roles: **Moderator** and **Dev** (moderation powers but not Administrator, so they can't see ADMIN), **Tester**, **Flamingo**, and per game a role named after the game (handed out by Onboarding) plus `<game>-expert`. Tester, Flamingo and the game roles have member-level permissions.
+- **Join-to-create voice rooms** (same as the clan bot): FLAMINGO SKIES and every game category get a "Join me to create" voice channel. Joining it makes you your own room in that category (you can rename it or set a user limit); it's deleted when the last person leaves. Game rooms stay visible only to that game's players.
 - **`#vesper-log`**: "Started, version `abc1234 ...`" on every start, channels it created, auto-update problems (skipped or rolled-back commits) and digest failures. Same idea as the clan bot's `#bot-commands`.
 - **Nightly backup** at 03:00 Asia/Jakarta: `fs.db` → `/opt/fsbot/backups/fs-Mon.db` … `fs-Sun.db` (7 days).
 - **Live "Playing now" card** in `#playing-now`, edited every 5 minutes (one message, never spams).
@@ -26,7 +27,7 @@ A game with universe ID `0` is a placeholder: it shows "Not published yet" and t
 ## 1. Discord app (5 min)
 1. https://discord.com/developers/applications → **New Application** "Flamingo Skies". Under **Bot**, copy the token into `.env`. Leave every Privileged Gateway Intent **off**.
 2. Invite it with exactly the permissions it needs to build the layout (it can only hand Moderator/Dev permissions it holds itself). Replace `APP_ID` with **General Information → Application ID**:
-   `https://discord.com/oauth2/authorize?client_id=APP_ID&permissions=1436025089206&scope=bot+applications.commands`
+   `https://discord.com/oauth2/authorize?client_id=APP_ID&permissions=1436026137782&scope=bot+applications.commands`
 3. Turn on Community first (Server Settings → Enable Community), so `#announcements` is created as an Announcement channel.
 4. After the first start: Server Settings → Roles → drag **Vesper** to the top, above Moderator and Dev.
 5. **Onboarding** (Server Settings → Onboarding): add a question "Which games do you play?" with one answer per game, each giving that game's role (e.g. "Huss game"). Add a required question that gives everyone **Flamingo**. Members can change their games later in Channels & Roles.

@@ -47,6 +47,8 @@ class Guild:
         c = self._new("news" if news else "text", name, category, overwrites); self.channels.append(c); return c
     async def create_forum(self, name, category, overwrites, reason):
         c = self._new("forum", name, category, overwrites); self.channels.append(c); return c
+    async def create_voice_channel(self, name, category, overwrites, reason):
+        c = self._new("voice", name, category, overwrites); self.channels.append(c); return c
 
 async def check_layout():
     import bot as b
@@ -79,6 +81,37 @@ async def check_layout():
     news_ow = game_news[0].overwrites
     assert news_ow["everyone"].send_messages is False and news_ow[role["Moderator"]].send_messages
     assert news_ow[role["Dev"]].send_messages and news_ow["everyone"].view_channel is False  # still game-gated
+    hubs = [o for o in g.made if o.kind == "voice"]
+    assert [h.name for h in hubs] == ["Join me to create"] * 3  # hub category + 2 games
     assert notes and await vesper.ensure_layout(g) == []  # second run changes nothing
 asyncio.run(check_layout())
+
+
+# join-to-create: joining the hub makes a room and moves you in; the room goes when it empties
+class VC:
+    def __init__(self, id, name, category=None): self.id, self.name, self.category, self.members, self.deleted = id, name, category, [], False
+    async def delete(self, reason): self.deleted = True
+class Cat:
+    name, overwrites = "HUSS GAME", {"everyone": "hidden"}
+    def __init__(self): self.rooms = []
+    async def create_voice_channel(self, name, overwrites):
+        r = VC(500 + len(self.rooms), name, self); r.overwrites = overwrites; self.rooms.append(r); return r
+class Member:
+    id, display_name = 7, "Edbert"
+    guild = type("G", (), {"id": 0})()
+    async def move_to(self, ch): self.moved = ch
+
+async def check_rooms():
+    import bot as b
+    b.GAMES, b.GUILD_ID = {"Huss game": 0}, 0
+    vesper = FSBot.__new__(FSBot); vesper.db = open_db(":memory:"); vesper.last_room = {}
+    cat, m = Cat(), Member()
+    hub = VC(1, "Join me to create", cat)
+    await vesper.on_voice_state_update(m, type("S", (), {"channel": None})(), type("S", (), {"channel": hub})())
+    room = cat.rooms[0]
+    assert room.name == "Edbert's room" and m.moved is room and room.overwrites["everyone"] == "hidden"  # keeps the gate
+    assert room.overwrites[m].manage_channels and vesper.room_ids() == {room.id}
+    await vesper.on_voice_state_update(m, type("S", (), {"channel": room})(), type("S", (), {"channel": None})())
+    assert room.deleted and vesper.room_ids() == set()
+asyncio.run(check_rooms())
 print("ok")
