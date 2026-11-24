@@ -3,7 +3,9 @@
 Discord bot for the Flamingo Skies server. Runs on the same GCP e2-micro as the Icarus clan bot, as a separate systemd service.
 
 ## What it does
-- **Creates its channels** on first start if missing: `#playing-now` (read-only), `#announcements` (Announcement channel; needs Community on) and `#studio-stats` (private). Move or rename them freely afterwards; it remembers them by ID.
+- **Creates its channels** on first start if missing: `#playing-now` (read-only), `#announcements` (Announcement channel; needs Community on), `#studio-stats` and `#vesper-log` (both private). Move or rename them freely afterwards; it remembers them by ID.
+- **`#vesper-log`**: "Started, version `abc1234 ...`" on every start, channels it created, auto-update problems (skipped or rolled-back commits) and digest failures. Same idea as the clan bot's `#bot-commands`.
+- **Nightly backup** at 03:00 Asia/Jakarta: `fs.db` → `/opt/fsbot/backups/fs-Mon.db` … `fs-Sun.db` (7 days).
 - **Live "Playing now" card** in `#playing-now`, edited every 5 minutes (one message, never spams).
 - **Visit milestones** (1K, 2.5K, 5K, 10K, 25K, ...) posted to `#announcements` and published to following servers. On first run it only remembers the current milestone, so it never announces old ones.
 - **Daily digest** at `DIGEST_HOUR` (Asia/Jakarta) in `#studio-stats`: DAU, visits, session length, D1/D7 retention, revenue, paying users, crashes. It uses Roblox's Open Cloud Analytics API, which is still Beta.
@@ -28,7 +30,7 @@ sudo nano /opt/fsbot/.env      # paste your filled-in .env
 sudo sh ~/setup.sh clone       # clone, install, start
 journalctl -u fsbot -f
 ```
-Optional: `sudo sh /opt/fsbot/app/deploy/setup.sh auto` turns on the same tested, rolled-back GitHub auto-deploy the clan bot uses (`journalctl -u fsbot-update -n 50`). Manual update: `sudo sh /opt/fsbot/app/deploy/update.sh`.
+Optional: `sudo sh /opt/fsbot/app/deploy/setup.sh auto` turns on the same tested, rolled-back GitHub auto-deploy the clan bot uses. Skipped or rolled-back updates show up in `#vesper-log` (full log: `journalctl -u fsbot-update -n 50`). Manual update: `sudo sh /opt/fsbot/app/deploy/update.sh`.
 
 How the two bots share the machine:
 

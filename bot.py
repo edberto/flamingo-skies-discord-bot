@@ -1,7 +1,9 @@
 """Vesper, the Flamingo Skies studio bot.
 
-- On start: creates #playing-now (read-only), #announcements (an Announcement channel once Community is on)
-  and #studio-stats (private) if they don't exist. Finds them by name; never deletes or edits existing channels.
+- On start: creates #playing-now (read-only), #announcements (an Announcement channel once Community is on),
+  #studio-stats and #vesper-log (both private) if they don't exist. Finds them by name; never deletes or edits them.
+- #vesper-log: "Started, version ..." on every start, channels it created, auto-update problems, digest failures.
+- Nightly at 03:00 Asia/Jakarta: copies fs.db to backups/fs-<weekday>.db (keeps 7 days).
 - Every 5 min: public Roblox stats for each game -> one live "playing now" card in #playing-now,
   and a post in #announcements when a game passes a visit milestone (1K, 2.5K, 5K, 10K, ...).
 - Daily at DIGEST_HOUR Asia/Jakarta: private analytics digest (Open Cloud Analytics, Beta) in #studio-stats.
@@ -12,6 +14,7 @@ import asyncio
 import logging
 import os
 import sqlite3
+import subprocess
 from datetime import date, datetime, time as dtime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -37,10 +40,12 @@ CHANNELS = {
     "status": ("playing-now", "readonly", int(os.environ.get("STATUS_CHANNEL_ID") or 0)),
     "announce": ("announcements", "news", int(os.environ.get("ANNOUNCE_CHANNEL_ID") or 0)),
     "stats": ("studio-stats", "private", int(os.environ.get("STATS_CHANNEL_ID") or 0)),
+    "log": ("vesper-log", "private", 0),
 }
 ANALYTICS_KEY = os.environ.get("ROBLOX_ANALYTICS_KEY", "")
 DIGEST_HOUR = int(os.environ.get("DIGEST_HOUR", "9"))
 DB_PATH = Path(os.environ.get("DB_PATH", "fs.db"))
+DEPLOY_NOTE = DB_PATH.resolve().parent / "deploy-note.txt"  # written by deploy/auto-update.sh
 
 # (Open Cloud metric, label, kind). Kinds: n = count, pct = 0..1 ratio, min = minutes, rbx = Robux.
 DIGEST_METRICS = [
@@ -147,6 +152,16 @@ def digest_text(name, results):
     return "\n".join(lines)
 
 
+def running_version():
+    """'abc1234 commit message' when running from a git checkout, else None."""
+    try:
+        out = subprocess.run(["git", "-C", str(Path(__file__).resolve().parent), "log", "-1", "--format=%h %s"],
+                             capture_output=True, text=True, timeout=5)
+        return out.stdout.strip() or None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def open_db(path=DB_PATH):
     db = sqlite3.connect(path)
     db.execute("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT)")
@@ -173,7 +188,9 @@ class FSBot(discord.Client):
         return self.get_channel(override or int(self.get(f"channel:{key}") or 0))
 
     async def ensure_channels(self, guild):
-        """Create our three channels if missing. Existing ones (by .env ID, saved ID or name) are left as they are."""
+        """Create our channels if missing; returns notes about what it made.
+        Existing ones (by .env ID, saved ID or name) are left as they are."""
+        notes = []
         for key, (name, kind, override) in CHANNELS.items():
             ch = guild.get_channel(override or int(self.get(f"channel:{key}") or 0))
             ch = ch or discord.utils.get(guild.text_channels, name=name)
@@ -184,10 +201,34 @@ class FSBot(discord.Client):
                 news = kind == "news" and "COMMUNITY" in guild.features
                 ch = await guild.create_text_channel(name, news=news, reason="Vesper setup",
                                                      overwrites={guild.default_role: everyone, guild.me: bot_can})
-                log.info("created #%s%s", name, " (announcement)" if news else "")
+                notes.append(f"Created #{name}" + (" (announcement)" if news else ""))
                 if kind == "news" and not news:
-                    log.warning("#%s is a normal text channel: turn on Community, then convert it to Announcement", name)
+                    notes.append(f"#{name} is a normal channel: turn on Community, then make it an Announcement channel")
             self.put(f"channel:{key}", ch.id)
+        for note in notes:
+            log.info(note)
+        return notes
+
+    async def bot_log(self, text):
+        """Post to #vesper-log; falls back to the server log if the channel is missing."""
+        log.info("bot-log: %s", text)
+        channel = self.channel("log")
+        try:
+            if channel:
+                await channel.send(text[:2000])
+        except discord.HTTPException:
+            log.warning("couldn't post to #vesper-log")
+
+    async def post_deploy_note(self):
+        """Relay problems from the auto-updater (skipped or rolled-back updates) to #vesper-log."""
+        try:
+            if DEPLOY_NOTE.exists():
+                text = DEPLOY_NOTE.read_text(encoding="utf-8").strip()
+                DEPLOY_NOTE.unlink()
+                if text:
+                    await self.bot_log("**Auto-update**\n" + text)
+        except OSError:
+            log.exception("couldn't read the deploy note")
 
     async def setup_hook(self):
         self.http_session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30))
@@ -197,6 +238,7 @@ class FSBot(discord.Client):
         await self.tree.sync(guild=guild)
         self.stats_loop.start()
         self.digest_loop.start()
+        self.backup_loop.start()
 
     async def close(self):
         if self.http_session:
@@ -243,6 +285,7 @@ class FSBot(discord.Client):
     # --- loops ----------------------------------------------------------------------------
     @tasks.loop(minutes=5)
     async def stats_loop(self):
+        await self.post_deploy_note()
         try:
             games = await self.fetch_games()
         except Exception:
@@ -259,9 +302,13 @@ class FSBot(discord.Client):
             log.error("Not in server %s: invite the bot, check GUILD_ID", GUILD_ID)
             return
         try:
-            await self.ensure_channels(guild)
+            notes = await self.ensure_channels(guild)
         except discord.Forbidden:
+            notes = []
             log.error("Can't create channels: give the bot Manage Channels, or create them yourself")
+        version = running_version()
+        await self.bot_log("\n".join(["**Started**" + (f", version `{version}`" if version else "")]
+                                     + [f"- {n}" for n in notes]))
 
     async def update_status(self, games):
         channel = self.channel("status")
@@ -295,12 +342,21 @@ class FSBot(discord.Client):
     async def digest_loop(self):
         try:
             await self.post_digest()
-        except Exception:
+        except Exception as e:
             log.exception("digest failed")
+            await self.bot_log(f"**Daily digest failed:** `{type(e).__name__}: {e}`"[:300])
 
     @digest_loop.before_loop
     async def _wait_digest(self):
         await self.wait_until_ready()
+
+    @tasks.loop(time=dtime(3, 0, tzinfo=JKT))
+    async def backup_loop(self):
+        backups = DB_PATH.resolve().parent / "backups"
+        backups.mkdir(exist_ok=True)
+        dst = sqlite3.connect(backups / f"fs-{datetime.now(JKT):%a}.db")  # keeps the last 7 days
+        self.db.backup(dst)
+        dst.close()
 
     async def post_digest(self):
         channel = self.channel("stats")

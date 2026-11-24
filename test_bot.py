@@ -39,13 +39,13 @@ class Guild:
 async def check_channels():
     bot = FSBot.__new__(FSBot); bot.db = open_db(":memory:")
     g = Guild()
-    await bot.ensure_channels(g)
-    assert [c[0] for c in g.created] == ["playing-now", "studio-stats"]
+    notes = await bot.ensure_channels(g)
+    assert [c[0] for c in g.created] == ["playing-now", "studio-stats", "vesper-log"]
+    assert notes == ["Created #playing-now", "Created #studio-stats", "Created #vesper-log"]
     status_ow, stats_ow = g.created[0][2], g.created[1][2]
     assert status_ow["everyone"].send_messages is False and status_ow["vesper"].send_messages is True
     assert stats_ow["everyone"].view_channel is False and stats_ow["vesper"].view_channel is True
     assert bot.get("channel:announce") == "1"
-    await bot.ensure_channels(g)
-    assert len(g.created) == 2
+    assert await bot.ensure_channels(g) == [] and len(g.created) == 3
 asyncio.run(check_channels())
 print("ok")
