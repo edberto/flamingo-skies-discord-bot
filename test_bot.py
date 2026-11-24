@@ -1,5 +1,7 @@
 """Run: python3 test_bot.py  (auto-update only deploys a commit if this passes)"""
-from bot import (announce_card, digest_text, fmt, latest_point, milestones_passed, open_db, parse_games, short,
+import asyncio
+
+from bot import (FSBot, announce_card, digest_text, fmt, latest_point, milestones_passed, open_db, parse_games, short,
                  stats_card, status_card)
 
 assert parse_games("Huss game:0, Other Game: 123") == {"Huss game": 0, "Other Game": 123}
@@ -23,6 +25,27 @@ for view in (stats_card("Huss", None), stats_card("Huss", game), stats_card("Hus
              status_card([("Huss", game), ("Next", None)]), announce_card("Hi", "Body"), announce_card("Hi", "B", game)):
     assert view.to_components(), view
 
-db = open_db(":memory:")
-db.execute("INSERT INTO kv VALUES ('a', '1')")
+# ensure_channels: creates what's missing with the right permissions, reuses existing ones, idempotent
+class Ch:
+    def __init__(self, id, name): self.id, self.name = id, name
+class Guild:
+    features, default_role, me = ["COMMUNITY"], "everyone", "vesper"
+    def __init__(self): self.text_channels, self.created = [Ch(1, "announcements")], []
+    def get_channel(self, cid): return next((c for c in self.text_channels if c.id == cid), None)
+    async def create_text_channel(self, name, news, reason, overwrites):
+        self.created.append((name, news, overwrites)); ch = Ch(100 + len(self.created), name)
+        self.text_channels.append(ch); return ch
+
+async def check_channels():
+    bot = FSBot.__new__(FSBot); bot.db = open_db(":memory:")
+    g = Guild()
+    await bot.ensure_channels(g)
+    assert [c[0] for c in g.created] == ["playing-now", "studio-stats"]
+    status_ow, stats_ow = g.created[0][2], g.created[1][2]
+    assert status_ow["everyone"].send_messages is False and status_ow["vesper"].send_messages is True
+    assert stats_ow["everyone"].view_channel is False and stats_ow["vesper"].view_channel is True
+    assert bot.get("channel:announce") == "1"
+    await bot.ensure_channels(g)
+    assert len(g.created) == 2
+asyncio.run(check_channels())
 print("ok")

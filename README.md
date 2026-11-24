@@ -3,17 +3,18 @@
 Discord bot for the Flamingo Skies server. Runs on the same GCP e2-micro as the Icarus clan bot, as a separate systemd service.
 
 ## What it does
-- **Live "Playing now" card** in `STATUS_CHANNEL_ID`, edited every 5 minutes (one message, never spams).
-- **Visit milestones** (1K, 2.5K, 5K, 10K, 25K, ...) posted to `ANNOUNCE_CHANNEL_ID` and published to following servers. On first run it only remembers the current milestone, so it never announces old ones.
-- **Daily digest** at `DIGEST_HOUR` (Asia/Jakarta) in `STATS_CHANNEL_ID`: DAU, visits, session length, D1/D7 retention, revenue, paying users, crashes. It uses Roblox's Open Cloud Analytics API, which is still Beta.
+- **Creates its channels** on first start if missing: `#playing-now` (read-only), `#announcements` (Announcement channel; needs Community on) and `#studio-stats` (private). Move or rename them freely afterwards; it remembers them by ID.
+- **Live "Playing now" card** in `#playing-now`, edited every 5 minutes (one message, never spams).
+- **Visit milestones** (1K, 2.5K, 5K, 10K, 25K, ...) posted to `#announcements` and published to following servers. On first run it only remembers the current milestone, so it never announces old ones.
+- **Daily digest** at `DIGEST_HOUR` (Asia/Jakarta) in `#studio-stats`: DAU, visits, session length, D1/D7 retention, revenue, paying users, crashes. It uses Roblox's Open Cloud Analytics API, which is still Beta.
 - `/stats game` for everyone. `/announce [game]` and `/digest-now` for people with **Manage Server**.
 
 A game with universe ID `0` is a placeholder: it shows "Not published yet" and the loops skip it. When the game is published, put its universe ID in `GAMES` and restart.
 
 ## 1. Discord app (5 min)
 1. https://discord.com/developers/applications → **New Application** "Flamingo Skies". Under **Bot**, copy the token into `.env`. Leave every Privileged Gateway Intent **off**.
-2. **OAuth2 → URL Generator**: scopes `bot` + `applications.commands`. Permissions: View Channels, Send Messages, Embed Links, Read Message History, Send Messages in Threads. Open the URL and add the bot to the server.
-3. Make the channels: `#playing-now` (read-only for members), `#announcements` (Announcement channel), `#studio-stats` (private: only you and the bot). Copy their IDs into `.env`.
+2. **OAuth2 → URL Generator**: scopes `bot` + `applications.commands`. Permissions: Manage Channels, View Channels, Send Messages, Embed Links, Read Message History, Send Messages in Threads. Open the URL and add the bot to the server.
+3. Turn on Community first (Server Settings → Enable Community), so `#announcements` is created as an Announcement channel.
 
 ## 2. Roblox key (3 min)
 Creator Dashboard → **Credentials → API Keys → Create API Key**. Add **universe-analytics** with only `universe.analytics:read`, on your games only. Paste it as `ROBLOX_ANALYTICS_KEY`. You can leave it empty until a game is published.

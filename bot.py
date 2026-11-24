@@ -1,8 +1,10 @@
-"""Flamingo Skies studio bot.
+"""Vesper, the Flamingo Skies studio bot.
 
-- Every 5 min: public Roblox stats for each game -> one live "playing now" card in STATUS_CHANNEL_ID,
-  and a post in ANNOUNCE_CHANNEL_ID when a game passes a visit milestone (1K, 2.5K, 5K, 10K, ...).
-- Daily at DIGEST_HOUR Asia/Jakarta: private analytics digest (Open Cloud Analytics, Beta) in STATS_CHANNEL_ID.
+- On start: creates #playing-now (read-only), #announcements (an Announcement channel once Community is on)
+  and #studio-stats (private) if they don't exist. Finds them by name; never deletes or edits existing channels.
+- Every 5 min: public Roblox stats for each game -> one live "playing now" card in #playing-now,
+  and a post in #announcements when a game passes a visit milestone (1K, 2.5K, 5K, 10K, ...).
+- Daily at DIGEST_HOUR Asia/Jakarta: private analytics digest (Open Cloud Analytics, Beta) in #studio-stats.
 - /stats: a game's card. /announce (Manage Server): release post with a Play button. /digest-now (Manage Server).
 A game whose universe ID is 0 is a placeholder: it shows as "not published yet" and is skipped by the loops.
 """
@@ -30,9 +32,12 @@ if Path(".env").exists():  # local runs; systemd sets these itself on the server
 JKT = ZoneInfo("Asia/Jakarta")
 PINK = 0xF25C9A
 GUILD_ID = int(os.environ.get("GUILD_ID", "0"))
-STATUS_CHANNEL_ID = int(os.environ.get("STATUS_CHANNEL_ID", "0"))
-ANNOUNCE_CHANNEL_ID = int(os.environ.get("ANNOUNCE_CHANNEL_ID", "0"))
-STATS_CHANNEL_ID = int(os.environ.get("STATS_CHANNEL_ID", "0"))
+# key -> (channel name, kind, optional ID override from .env)
+CHANNELS = {
+    "status": ("playing-now", "readonly", int(os.environ.get("STATUS_CHANNEL_ID") or 0)),
+    "announce": ("announcements", "news", int(os.environ.get("ANNOUNCE_CHANNEL_ID") or 0)),
+    "stats": ("studio-stats", "private", int(os.environ.get("STATS_CHANNEL_ID") or 0)),
+}
 ANALYTICS_KEY = os.environ.get("ROBLOX_ANALYTICS_KEY", "")
 DIGEST_HOUR = int(os.environ.get("DIGEST_HOUR", "9"))
 DB_PATH = Path(os.environ.get("DB_PATH", "fs.db"))
@@ -163,6 +168,27 @@ class FSBot(discord.Client):
         self.db.execute("INSERT OR REPLACE INTO kv VALUES (?, ?)", (k, str(v)))
         self.db.commit()
 
+    def channel(self, key):
+        override = CHANNELS[key][2]
+        return self.get_channel(override or int(self.get(f"channel:{key}") or 0))
+
+    async def ensure_channels(self, guild):
+        """Create our three channels if missing. Existing ones (by .env ID, saved ID or name) are left as they are."""
+        for key, (name, kind, override) in CHANNELS.items():
+            ch = guild.get_channel(override or int(self.get(f"channel:{key}") or 0))
+            ch = ch or discord.utils.get(guild.text_channels, name=name)
+            if not ch:
+                bot_can = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+                everyone = (discord.PermissionOverwrite(view_channel=False) if kind == "private"
+                            else discord.PermissionOverwrite(send_messages=False))
+                news = kind == "news" and "COMMUNITY" in guild.features
+                ch = await guild.create_text_channel(name, news=news, reason="Vesper setup",
+                                                     overwrites={guild.default_role: everyone, guild.me: bot_can})
+                log.info("created #%s%s", name, " (announcement)" if news else "")
+                if kind == "news" and not news:
+                    log.warning("#%s is a normal text channel: turn on Community, then convert it to Announcement", name)
+            self.put(f"channel:{key}", ch.id)
+
     async def setup_hook(self):
         self.http_session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30))
         register_commands(self)
@@ -228,9 +254,17 @@ class FSBot(discord.Client):
     @stats_loop.before_loop
     async def _wait_stats(self):
         await self.wait_until_ready()
+        guild = self.get_guild(GUILD_ID)
+        if not guild:
+            log.error("Not in server %s: invite the bot, check GUILD_ID", GUILD_ID)
+            return
+        try:
+            await self.ensure_channels(guild)
+        except discord.Forbidden:
+            log.error("Can't create channels: give the bot Manage Channels, or create them yourself")
 
     async def update_status(self, games):
-        channel = self.get_channel(STATUS_CHANNEL_ID)
+        channel = self.channel("status")
         if not channel:
             return
         view = status_card([(name, games.get(uid)) for name, uid in GAMES.items()])
@@ -244,7 +278,7 @@ class FSBot(discord.Client):
         self.put("status_message", (await channel.send(view=view)).id)
 
     async def check_milestones(self, games):
-        channel = self.get_channel(ANNOUNCE_CHANNEL_ID)
+        channel = self.channel("announce")
         for uid, game in games.items():
             reached, key = milestones_passed(game["visits"]), f"milestone:{uid}"
             last = self.get(key)
@@ -269,9 +303,11 @@ class FSBot(discord.Client):
         await self.wait_until_ready()
 
     async def post_digest(self):
-        channel = self.get_channel(STATS_CHANNEL_ID)
-        if not channel or not ANALYTICS_KEY:
-            return "STATS_CHANNEL_ID or ROBLOX_ANALYTICS_KEY isn't set."
+        channel = self.channel("stats")
+        if not channel:
+            return "No #studio-stats channel yet."
+        if not ANALYTICS_KEY:
+            return "ROBLOX_ANALYTICS_KEY isn't set yet (it's added once a game is published)."
         # 8-day window: retention for recent days isn't final yet, so each metric shows its latest valid day
         end = datetime.now(timezone.utc).date()
         start = end - timedelta(days=8)
@@ -311,9 +347,9 @@ class AnnounceModal(discord.ui.Modal, title="New announcement"):
         self.bot, self.universe_id = bot, universe_id
 
     async def on_submit(self, interaction):
-        channel = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
+        channel = self.bot.channel("announce")
         if not channel:
-            return await interaction.response.send_message("ANNOUNCE_CHANNEL_ID isn't set.", ephemeral=True)
+            return await interaction.response.send_message("No #announcements channel yet.", ephemeral=True)
         await interaction.response.defer(ephemeral=True)
         game = (await self.bot.fetch_games()).get(self.universe_id) if self.universe_id else None
         msg = await channel.send(view=announce_card(self.heading.value, self.message.value, game))
