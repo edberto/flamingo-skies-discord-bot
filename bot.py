@@ -89,14 +89,14 @@ def slug(name):
 def layout(games):
     """[(category, who sees it, [(channel, kind, key)])]. Who: None = everyone, "admin" = admins only,
     a game name = that game's role, its experts, Moderator and Dev.
-    Kinds: text, readonly, news, forum, hidden (admins only)."""
+    Kinds: text, readonly, news, forum, hidden (admins, Moderator and Dev only)."""
     cats = [("FLAMINGO SKIES", None, [("announcements", "news", "announce"), ("playing-now", "readonly", "status"),
                                        ("bot-commands", "text", None)]),
             ("ADMIN", "admin", [("studio-stats", "text", "stats"), ("vesper-log", "text", "log")])]
     for game in games:
         cats.append((game.upper(), game, [("media", "text", None), ("chat", "text", None), ("questions", "text", None),
                                           ("suggestions", "forum", None), ("bug-report", "forum", None),
-                                          ("top-suggestions", "hidden", None)]))
+                                          ("top-suggestions", "hidden", None)]))  # staff only
     return cats
 
 
@@ -256,8 +256,8 @@ class FSBot(discord.Client):
                     if kind in ("readonly", "news"):
                         ow[everyone] = discord.PermissionOverwrite(send_messages=False)
                         ow[guild.me] = bot_can
-                    if kind == "hidden":  # admins only, even inside a game category
-                        ow = {everyone: hide, guild.me: bot_can}
+                    if kind == "hidden":  # staff only, even inside a game category
+                        ow = {everyone: hide, guild.me: bot_can, role["Moderator"]: see, role["Dev"]: see}
                     if kind == "forum":
                         ch = await guild.create_forum(name, category=cat, overwrites=ow, reason="Vesper setup")
                     else:

@@ -9,7 +9,7 @@ Discord bot for the Flamingo Skies server. Runs on the same GCP e2-micro as the 
   |---|---|---|
   | FLAMINGO SKIES | Everyone | `#announcements` (Announcement channel; needs Community), `#playing-now` (read-only), `#bot-commands` (for fun bots) |
   | ADMIN | Admins only | `#studio-stats`, `#vesper-log` |
-  | One per game, e.g. HUSS GAME | That game's role, `<game>-expert`, Moderator, Dev | `#media`, `#chat`, `#questions`, `#suggestions` (forum), `#bug-report` (forum), `#top-suggestions` (admins only) |
+  | One per game, e.g. HUSS GAME | That game's role, `<game>-expert`, Moderator, Dev | `#media`, `#chat`, `#questions`, `#suggestions` (forum), `#bug-report` (forum), `#top-suggestions` (Moderator, Dev and admins only) |
 
   Roles: **Moderator** and **Dev** (moderation powers but not Administrator, so they can't see ADMIN), **Tester**, **Flamingo**, and per game a role named after the game (handed out by Onboarding) plus `<game>-expert`. Tester, Flamingo and the game roles have member-level permissions.
 - **`#vesper-log`**: "Started, version `abc1234 ...`" on every start, channels it created, auto-update problems (skipped or rolled-back commits) and digest failures. Same idea as the clan bot's `#bot-commands`.

@@ -64,8 +64,9 @@ async def check_layout():
     assert hide["everyone"].view_channel is False and hide["vesper"].view_channel is True
     assert all(hide[role[n]].view_channel for n in ("Huss game", "huss-game-expert", "Moderator", "Dev"))
     assert role["Flamingo"] not in hide and role["Tester"] not in hide
-    top = by["top-suggestions"].overwrites  # admins only: no game/staff role opens it
-    assert top == {"everyone": top["everyone"], "vesper": top["vesper"]} and top["everyone"].view_channel is False
+    top = by["top-suggestions"].overwrites  # staff only: Moderator and Dev, not the game or expert roles
+    assert top["everyone"].view_channel is False and top[role["Moderator"]].view_channel and top[role["Dev"]].view_channel
+    assert role["Huss game"] not in top and role["huss-game-expert"] not in top
     admin = by["ADMIN"].overwrites
     assert admin["everyone"].view_channel is False and role["Moderator"] not in admin and role["Dev"] not in admin
     assert by["studio-stats"].overwrites["everyone"].view_channel is False  # inherits the ADMIN lock
