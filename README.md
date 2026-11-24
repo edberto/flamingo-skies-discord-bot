@@ -3,7 +3,15 @@
 Discord bot for the Flamingo Skies server. Runs on the same GCP e2-micro as the Icarus clan bot, as a separate systemd service.
 
 ## What it does
-- **Creates its channels** on first start if missing: `#playing-now` (read-only), `#announcements` (Announcement channel; needs Community on), `#studio-stats` and `#vesper-log` (both private). Move or rename them freely afterwards; it remembers them by ID.
+- **Builds the server layout** on every start, creating only what's missing (it never edits or deletes):
+
+  | Category | Who sees it | Channels |
+  |---|---|---|
+  | FLAMINGO SKIES | Everyone | `#announcements` (Announcement channel; needs Community), `#playing-now` (read-only), `#bot-commands` (for fun bots) |
+  | ADMIN | Admins only | `#studio-stats`, `#vesper-log` |
+  | One per game, e.g. HUSS GAME | That game's role, `<game>-expert`, Moderator, Dev | `#media`, `#chat`, `#questions`, `#suggestions` (forum), `#bug-report` (forum), `#top-suggestions` (admins only) |
+
+  Roles: **Moderator** and **Dev** (moderation powers but not Administrator, so they can't see ADMIN), **Tester**, **Flamingo**, and per game a role named after the game (handed out by Onboarding) plus `<game>-expert`. Tester, Flamingo and the game roles have member-level permissions.
 - **`#vesper-log`**: "Started, version `abc1234 ...`" on every start, channels it created, auto-update problems (skipped or rolled-back commits) and digest failures. Same idea as the clan bot's `#bot-commands`.
 - **Nightly backup** at 03:00 Asia/Jakarta: `fs.db` → `/opt/fsbot/backups/fs-Mon.db` … `fs-Sun.db` (7 days).
 - **Live "Playing now" card** in `#playing-now`, edited every 5 minutes (one message, never spams).
@@ -15,8 +23,11 @@ A game with universe ID `0` is a placeholder: it shows "Not published yet" and t
 
 ## 1. Discord app (5 min)
 1. https://discord.com/developers/applications → **New Application** "Flamingo Skies". Under **Bot**, copy the token into `.env`. Leave every Privileged Gateway Intent **off**.
-2. **OAuth2 → URL Generator**: scopes `bot` + `applications.commands`. Permissions: Manage Channels, View Channels, Send Messages, Embed Links, Read Message History, Send Messages in Threads. Open the URL and add the bot to the server.
+2. Invite it with exactly the permissions it needs to build the layout (it can only hand Moderator/Dev permissions it holds itself). Replace `APP_ID` with **General Information → Application ID**:
+   `https://discord.com/oauth2/authorize?client_id=APP_ID&permissions=1436025089206&scope=bot+applications.commands`
 3. Turn on Community first (Server Settings → Enable Community), so `#announcements` is created as an Announcement channel.
+4. After the first start: Server Settings → Roles → drag **Vesper** to the top, above Moderator and Dev.
+5. **Onboarding** (Server Settings → Onboarding): add a question "Which games do you play?" with one answer per game, each giving that game's role (e.g. "Huss game"). Add a required question that gives everyone **Flamingo**. Members can change their games later in Channels & Roles.
 
 ## 2. Roblox key (3 min)
 Creator Dashboard → **Credentials → API Keys → Create API Key**. Add **universe-analytics** with only `universe.analytics:read`, on your games only. Paste it as `ROBLOX_ANALYTICS_KEY`. You can leave it empty until a game is published.

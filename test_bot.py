@@ -25,27 +25,51 @@ for view in (stats_card("Huss", None), stats_card("Huss", game), stats_card("Hus
              status_card([("Huss", game), ("Next", None)]), announce_card("Hi", "Body"), announce_card("Hi", "B", game)):
     assert view.to_components(), view
 
-# ensure_channels: creates what's missing with the right permissions, reuses existing ones, idempotent
-class Ch:
-    def __init__(self, id, name): self.id, self.name = id, name
+# ensure_layout: creates what's missing with the right visibility, reuses existing things, idempotent
+class Obj:
+    def __init__(self, id, name, **kw): self.id, self.name, self.channels, self.overwrites = id, name, [], {}; self.__dict__.update(kw)
 class Guild:
     features, default_role, me = ["COMMUNITY"], "everyone", "vesper"
-    def __init__(self): self.text_channels, self.created = [Ch(1, "announcements")], []
-    def get_channel(self, cid): return next((c for c in self.text_channels if c.id == cid), None)
-    async def create_text_channel(self, name, news, reason, overwrites):
-        self.created.append((name, news, overwrites)); ch = Ch(100 + len(self.created), name)
-        self.text_channels.append(ch); return ch
+    def __init__(self):
+        self.made, self.roles, self.categories = [], [Obj(1, "Moderator")], []  # Moderator already exists
+        self.channels = [Obj(2, "announcements")]
+    def get_channel(self, cid): return next((c for c in self.channels if c.id == cid), None)
+    def _new(self, kind, name, category=None, overwrites=None, **kw):
+        o = Obj(100 + len(self.made), name, kind=kind, overwrites=overwrites or {}, **kw)
+        self.made.append(o)
+        if category: category.channels.append(o)
+        return o
+    async def create_role(self, name, **kw): r = self._new("role", name, **kw); self.roles.append(r); return r
+    async def create_category(self, name, overwrites, reason):
+        c = self._new("category", name, overwrites=overwrites); self.categories.append(c); return c
+    async def create_text_channel(self, name, category, news, overwrites, reason):
+        c = self._new("news" if news else "text", name, category, overwrites); self.channels.append(c); return c
+    async def create_forum(self, name, category, overwrites, reason):
+        c = self._new("forum", name, category, overwrites); self.channels.append(c); return c
 
-async def check_channels():
-    bot = FSBot.__new__(FSBot); bot.db = open_db(":memory:")
+async def check_layout():
+    import bot as b
+    b.GAMES = {"Huss game": 0}
+    vesper = FSBot.__new__(FSBot); vesper.db = open_db(":memory:")
     g = Guild()
-    notes = await bot.ensure_channels(g)
-    assert [c[0] for c in g.created] == ["playing-now", "studio-stats", "vesper-log"]
-    assert notes == ["Created #playing-now", "Created #studio-stats", "Created #vesper-log"]
-    status_ow, stats_ow = g.created[0][2], g.created[1][2]
-    assert status_ow["everyone"].send_messages is False and status_ow["vesper"].send_messages is True
-    assert stats_ow["everyone"].view_channel is False and stats_ow["vesper"].view_channel is True
-    assert bot.get("channel:announce") == "1"
-    assert await bot.ensure_channels(g) == [] and len(g.created) == 3
-asyncio.run(check_channels())
+    notes = await vesper.ensure_layout(g)
+    made = {(o.kind, o.name) for o in g.made}
+    assert ("role", "Moderator") not in made and {("role", "Dev"), ("role", "Huss game"), ("role", "huss-game-expert"),
+                                                   ("role", "Flamingo"), ("role", "Tester")} <= made
+    assert ("text", "announcements") not in made and vesper.get("channel:announce") == "2"  # reused, not duplicated
+    assert {("text", "bot-commands"), ("forum", "suggestions"), ("forum", "bug-report"), ("text", "media")} <= made
+    by = {o.name: o for o in g.made}
+    role = {r.name: r for r in g.roles}
+    hide = by["HUSS GAME"].overwrites
+    assert hide["everyone"].view_channel is False and hide["vesper"].view_channel is True
+    assert all(hide[role[n]].view_channel for n in ("Huss game", "huss-game-expert", "Moderator", "Dev"))
+    assert role["Flamingo"] not in hide and role["Tester"] not in hide
+    top = by["top-suggestions"].overwrites  # admins only: no game/staff role opens it
+    assert top == {"everyone": top["everyone"], "vesper": top["vesper"]} and top["everyone"].view_channel is False
+    admin = by["ADMIN"].overwrites
+    assert admin["everyone"].view_channel is False and role["Moderator"] not in admin and role["Dev"] not in admin
+    assert by["studio-stats"].overwrites["everyone"].view_channel is False  # inherits the ADMIN lock
+    assert by["playing-now"].overwrites["everyone"].send_messages is False and by["bot-commands"].overwrites == {}
+    assert notes and await vesper.ensure_layout(g) == []  # second run changes nothing
+asyncio.run(check_layout())
 print("ok")

@@ -1,7 +1,8 @@
 """Vesper, the Flamingo Skies studio bot.
 
-- On start: creates #playing-now (read-only), #announcements (an Announcement channel once Community is on),
-  #studio-stats and #vesper-log (both private) if they don't exist. Finds them by name; never deletes or edits them.
+- On start: creates any missing roles, categories and channels of the server layout (layout() below). Each game
+  in GAMES gets a role named after it and a category only that role (plus its experts and staff) can see; Discord
+  Onboarding hands out the game roles. Finds existing things by name and never edits or deletes anything.
 - #vesper-log: "Started, version ..." on every start, channels it created, auto-update problems, digest failures.
 - Nightly at 03:00 Asia/Jakarta: copies fs.db to backups/fs-<weekday>.db (keeps 7 days).
 - Every 5 min: public Roblox stats for each game -> one live "playing now" card in #playing-now,
@@ -35,13 +36,10 @@ if Path(".env").exists():  # local runs; systemd sets these itself on the server
 JKT = ZoneInfo("Asia/Jakarta")
 PINK = 0xF25C9A
 GUILD_ID = int(os.environ.get("GUILD_ID", "0"))
-# key -> (channel name, kind, optional ID override from .env)
-CHANNELS = {
-    "status": ("playing-now", "readonly", int(os.environ.get("STATUS_CHANNEL_ID") or 0)),
-    "announce": ("announcements", "news", int(os.environ.get("ANNOUNCE_CHANNEL_ID") or 0)),
-    "stats": ("studio-stats", "private", int(os.environ.get("STATS_CHANNEL_ID") or 0)),
-    "log": ("vesper-log", "private", 0),
-}
+# Channels the bot itself posts in: key -> optional ID override from .env (else found by name / created)
+OVERRIDES = {"status": int(os.environ.get("STATUS_CHANNEL_ID") or 0),
+             "announce": int(os.environ.get("ANNOUNCE_CHANNEL_ID") or 0),
+             "stats": int(os.environ.get("STATS_CHANNEL_ID") or 0), "log": 0}
 ANALYTICS_KEY = os.environ.get("ROBLOX_ANALYTICS_KEY", "")
 DIGEST_HOUR = int(os.environ.get("DIGEST_HOUR", "9"))
 DB_PATH = Path(os.environ.get("DB_PATH", "fs.db"))
@@ -71,6 +69,44 @@ def parse_games(raw):
 
 
 GAMES = parse_games(os.environ.get("GAMES", "Huss game:0"))
+
+# "Admin privileges except the admin category": everything a moderator needs, but not Administrator
+# (Administrator would bypass the ADMIN category's lock). The bot must hold these itself to hand them out.
+STAFF_PERMS = discord.Permissions(
+    manage_guild=True, manage_roles=True, manage_channels=True, kick_members=True, ban_members=True,
+    moderate_members=True, manage_messages=True, manage_threads=True, manage_nicknames=True, view_audit_log=True,
+    mute_members=True, deafen_members=True, move_members=True, manage_events=True, manage_expressions=True,
+    mention_everyone=True)
+BOT_PERMS = STAFF_PERMS | discord.Permissions(
+    view_channel=True, send_messages=True, embed_links=True, attach_files=True, read_message_history=True,
+    send_messages_in_threads=True, create_public_threads=True)
+
+
+def slug(name):
+    return "-".join("".join(c if c.isalnum() else " " for c in name.lower()).split())
+
+
+def layout(games):
+    """[(category, who sees it, [(channel, kind, key)])]. Who: None = everyone, "admin" = admins only,
+    a game name = that game's role, its experts, Moderator and Dev.
+    Kinds: text, readonly, news, forum, hidden (admins only)."""
+    cats = [("FLAMINGO SKIES", None, [("announcements", "news", "announce"), ("playing-now", "readonly", "status"),
+                                       ("bot-commands", "text", None)]),
+            ("ADMIN", "admin", [("studio-stats", "text", "stats"), ("vesper-log", "text", "log")])]
+    for game in games:
+        cats.append((game.upper(), game, [("media", "text", None), ("chat", "text", None), ("questions", "text", None),
+                                          ("suggestions", "forum", None), ("bug-report", "forum", None),
+                                          ("top-suggestions", "hidden", None)]))
+    return cats
+
+
+def roles(games):
+    """[(name, permissions, colour, hoist)]. Member-like roles get no extra permissions (they inherit @everyone)."""
+    return ([("Moderator", STAFF_PERMS, 0xFF7A59, True), ("Dev", STAFF_PERMS, 0x9D8CC4, True),
+             ("Tester", discord.Permissions.none(), 0xFFE3A3, False),
+             ("Flamingo", discord.Permissions.none(), 0xF48FB4, False)]
+            + [r for g in games for r in ((g, discord.Permissions.none(), 0, False),  # game access, from Onboarding
+                                          (f"{slug(g)}-expert", discord.Permissions.none(), 0xFFC1D4, False))])
 
 
 def milestones_passed(visits):
@@ -184,27 +220,55 @@ class FSBot(discord.Client):
         self.db.commit()
 
     def channel(self, key):
-        override = CHANNELS[key][2]
-        return self.get_channel(override or int(self.get(f"channel:{key}") or 0))
+        return self.get_channel(OVERRIDES[key] or int(self.get(f"channel:{key}") or 0))
 
-    async def ensure_channels(self, guild):
-        """Create our channels if missing; returns notes about what it made.
-        Existing ones (by .env ID, saved ID or name) are left as they are."""
-        notes = []
-        for key, (name, kind, override) in CHANNELS.items():
-            ch = guild.get_channel(override or int(self.get(f"channel:{key}") or 0))
-            ch = ch or discord.utils.get(guild.text_channels, name=name)
-            if not ch:
-                bot_can = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-                everyone = (discord.PermissionOverwrite(view_channel=False) if kind == "private"
-                            else discord.PermissionOverwrite(send_messages=False))
-                news = kind == "news" and "COMMUNITY" in guild.features
-                ch = await guild.create_text_channel(name, news=news, reason="Vesper setup",
-                                                     overwrites={guild.default_role: everyone, guild.me: bot_can})
-                notes.append(f"Created #{name}" + (" (announcement)" if news else ""))
-                if kind == "news" and not news:
-                    notes.append(f"#{name} is a normal channel: turn on Community, then make it an Announcement channel")
-            self.put(f"channel:{key}", ch.id)
+    async def ensure_layout(self, guild):
+        """Create missing roles, categories and channels; returns notes about what it made.
+        Existing ones are found by name (bot channels also by saved/.env ID) and left exactly as they are."""
+        notes, everyone = [], guild.default_role
+        bot_can = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True,
+                                              send_messages_in_threads=True)
+        hide, see = discord.PermissionOverwrite(view_channel=False), discord.PermissionOverwrite(view_channel=True)
+        role = {}
+        for name, perms, colour, hoist in roles(GAMES):
+            role[name] = discord.utils.get(guild.roles, name=name)
+            if not role[name]:
+                role[name] = await guild.create_role(name=name, permissions=perms, colour=colour, hoist=hoist,
+                                                     reason="Vesper setup")
+                notes.append(f"Created role {name}")
+        for cat_name, who, channels in layout(GAMES):
+            cat = discord.utils.get(guild.categories, name=cat_name)
+            if not cat:
+                ow = {}
+                if who:  # locked category: hidden from everyone, then opened to the right roles
+                    ow = {everyone: hide, guild.me: bot_can}
+                if who and who != "admin":
+                    for r in (who, f"{slug(who)}-expert", "Moderator", "Dev"):
+                        ow[role[r]] = see
+                cat = await guild.create_category(cat_name, overwrites=ow, reason="Vesper setup")
+                notes.append(f"Created category {cat_name}")
+            for name, kind, key in channels:
+                ch = guild.get_channel(OVERRIDES.get(key) or int(self.get(f"channel:{key}") or 0)) if key else None
+                # bot channels are unique server-wide; game channels ("chat", ...) only within their category
+                ch = ch or discord.utils.get(guild.channels if key else cat.channels, name=name)
+                if not ch:
+                    ow = dict(cat.overwrites)  # start from the category's lock, then add the channel's own
+                    if kind in ("readonly", "news"):
+                        ow[everyone] = discord.PermissionOverwrite(send_messages=False)
+                        ow[guild.me] = bot_can
+                    if kind == "hidden":  # admins only, even inside a game category
+                        ow = {everyone: hide, guild.me: bot_can}
+                    if kind == "forum":
+                        ch = await guild.create_forum(name, category=cat, overwrites=ow, reason="Vesper setup")
+                    else:
+                        news = kind == "news" and "COMMUNITY" in guild.features
+                        ch = await guild.create_text_channel(name, category=cat, news=news, overwrites=ow,
+                                                             reason="Vesper setup")
+                        if kind == "news" and not news:
+                            notes.append(f"#{name} is a normal channel: turn on Community, then make it an Announcement channel")
+                    notes.append(f"Created #{name} in {cat_name}")
+                if key:
+                    self.put(f"channel:{key}", ch.id)
         for note in notes:
             log.info(note)
         return notes
@@ -302,10 +366,11 @@ class FSBot(discord.Client):
             log.error("Not in server %s: invite the bot, check GUILD_ID", GUILD_ID)
             return
         try:
-            notes = await self.ensure_channels(guild)
+            notes = await self.ensure_layout(guild)
         except discord.Forbidden:
-            notes = []
-            log.error("Can't create channels: give the bot Manage Channels, or create them yourself")
+            notes = ["Couldn't finish the server layout: Vesper is missing a permission (see README, invite link), "
+                     "or its role isn't at the top of the role list"]
+            log.error(notes[0])
         version = running_version()
         await self.bot_log("\n".join(["**Started**" + (f", version `{version}`" if version else "")]
                                      + [f"- {n}" for n in notes]))
