@@ -31,8 +31,9 @@ class Obj:
 class Guild:
     features, default_role, me = ["COMMUNITY"], "everyone", "vesper"
     def __init__(self):
-        self.made, self.roles, self.categories = [], [Obj(1, "Moderator")], []  # Moderator already exists
-        self.channels = [Obj(2, "announcements")]
+        self.made, self.roles = [], [Obj(1, "Moderator")]  # Moderator already exists
+        hub = Obj(3, "FLAMINGO SKIES"); hub.channels = [Obj(2, "announcements")]  # and so does the hub's #announcements
+        self.categories, self.channels = [hub], list(hub.channels)
     def get_channel(self, cid): return next((c for c in self.channels if c.id == cid), None)
     def _new(self, kind, name, category=None, overwrites=None, **kw):
         o = Obj(100 + len(self.made), name, kind=kind, overwrites=overwrites or {}, **kw)
@@ -49,14 +50,18 @@ class Guild:
 
 async def check_layout():
     import bot as b
-    b.GAMES = {"Huss game": 0}
+    b.GAMES = {"Huss game": 0, "Mahjong Mayhem": 0}
     vesper = FSBot.__new__(FSBot); vesper.db = open_db(":memory:")
     g = Guild()
     notes = await vesper.ensure_layout(g)
     made = {(o.kind, o.name) for o in g.made}
     assert ("role", "Moderator") not in made and {("role", "Dev"), ("role", "Huss game"), ("role", "huss-game-expert"),
                                                    ("role", "Flamingo"), ("role", "Tester")} <= made
-    assert ("text", "announcements") not in made and vesper.get("channel:announce") == "2"  # reused, not duplicated
+    assert vesper.get("channel:announce") == "2" and ("category", "FLAMINGO SKIES") not in made  # reused
+    game_news = [o for o in g.made if o.name == "announcements"]
+    assert [o.kind for o in game_news] == ["news", "news"]  # one per game, not a duplicate hub one
+    assert vesper.get("channel:announce:Mahjong Mayhem") == str(game_news[1].id)
+    assert {("category", "MAHJONG MAYHEM"), ("role", "mahjong-mayhem-expert"), ("role", "Mahjong Mayhem")} <= made
     assert {("text", "bot-commands"), ("forum", "suggestions"), ("forum", "bug-report"), ("text", "media")} <= made
     by = {o.name: o for o in g.made}
     role = {r.name: r for r in g.roles}
@@ -71,6 +76,9 @@ async def check_layout():
     assert admin["everyone"].view_channel is False and role["Moderator"] not in admin and role["Dev"] not in admin
     assert by["studio-stats"].overwrites["everyone"].view_channel is False  # inherits the ADMIN lock
     assert by["playing-now"].overwrites["everyone"].send_messages is False and by["bot-commands"].overwrites == {}
+    news_ow = game_news[0].overwrites
+    assert news_ow["everyone"].send_messages is False and news_ow[role["Moderator"]].send_messages
+    assert news_ow[role["Dev"]].send_messages and news_ow["everyone"].view_channel is False  # still game-gated
     assert notes and await vesper.ensure_layout(g) == []  # second run changes nothing
 asyncio.run(check_layout())
 print("ok")

@@ -7,17 +7,19 @@ Discord bot for the Flamingo Skies server. Runs on the same GCP e2-micro as the 
 
   | Category | Who sees it | Channels |
   |---|---|---|
-  | FLAMINGO SKIES | Everyone | `#announcements` (Announcement channel; needs Community), `#playing-now` (read-only), `#bot-commands` (for fun bots) |
+  | FLAMINGO SKIES | Everyone | `#announcements` (studio-wide; Announcement channel, needs Community), `#playing-now` (read-only), `#bot-commands` (for fun bots) |
   | ADMIN | Admins only | `#studio-stats`, `#vesper-log` |
-  | One per game, e.g. HUSS GAME | That game's role, `<game>-expert`, Moderator, Dev | `#media`, `#chat`, `#questions`, `#suggestions` (forum), `#bug-report` (forum), `#top-suggestions` (Moderator, Dev and admins only) |
+  | One per game, e.g. HUSS GAME | That game's role, `<game>-expert`, Moderator, Dev | `#announcements` (that game's news), `#media`, `#chat`, `#questions`, `#suggestions` (forum), `#bug-report` (forum), `#top-suggestions` (Moderator, Dev and admins only) |
+
+  In every `#announcements`, only admins, Moderator, Dev and Vesper can post. To add a game later, add it to `GAMES` and restart.
 
   Roles: **Moderator** and **Dev** (moderation powers but not Administrator, so they can't see ADMIN), **Tester**, **Flamingo**, and per game a role named after the game (handed out by Onboarding) plus `<game>-expert`. Tester, Flamingo and the game roles have member-level permissions.
 - **`#vesper-log`**: "Started, version `abc1234 ...`" on every start, channels it created, auto-update problems (skipped or rolled-back commits) and digest failures. Same idea as the clan bot's `#bot-commands`.
 - **Nightly backup** at 03:00 Asia/Jakarta: `fs.db` → `/opt/fsbot/backups/fs-Mon.db` … `fs-Sun.db` (7 days).
 - **Live "Playing now" card** in `#playing-now`, edited every 5 minutes (one message, never spams).
-- **Visit milestones** (1K, 2.5K, 5K, 10K, 25K, ...) posted to `#announcements` and published to following servers. On first run it only remembers the current milestone, so it never announces old ones.
+- **Visit milestones** (1K, 2.5K, 5K, 10K, 25K, ...) posted to that game's `#announcements` and published to following servers. On first run it only remembers the current milestone, so it never announces old ones.
 - **Daily digest** at `DIGEST_HOUR` (Asia/Jakarta) in `#studio-stats`: DAU, visits, session length, D1/D7 retention, revenue, paying users, crashes. It uses Roblox's Open Cloud Analytics API, which is still Beta.
-- `/stats game` for everyone. `/announce [game]` and `/digest-now` for people with **Manage Server**.
+- `/stats game` for everyone. `/announce [game]` (no game: studio-wide `#announcements`; with a game: that game's `#announcements`, with a Play button) and `/digest-now` for people with **Manage Server**.
 
 A game with universe ID `0` is a placeholder: it shows "Not published yet" and the loops skip it. When the game is published, put its universe ID in `GAMES` and restart.
 

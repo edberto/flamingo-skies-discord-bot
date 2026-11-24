@@ -6,9 +6,10 @@
 - #vesper-log: "Started, version ..." on every start, channels it created, auto-update problems, digest failures.
 - Nightly at 03:00 Asia/Jakarta: copies fs.db to backups/fs-<weekday>.db (keeps 7 days).
 - Every 5 min: public Roblox stats for each game -> one live "playing now" card in #playing-now,
-  and a post in #announcements when a game passes a visit milestone (1K, 2.5K, 5K, 10K, ...).
+  and a post in that game's #announcements when a game passes a visit milestone (1K, 2.5K, 5K, 10K, ...).
 - Daily at DIGEST_HOUR Asia/Jakarta: private analytics digest (Open Cloud Analytics, Beta) in #studio-stats.
-- /stats: a game's card. /announce (Manage Server): release post with a Play button. /digest-now (Manage Server).
+- /stats: a game's card. /announce (Manage Server): studio-wide post, or with a game: in that game's
+  #announcements with a Play button. /digest-now (Manage Server).
 A game whose universe ID is 0 is a placeholder: it shows as "not published yet" and is skipped by the loops.
 """
 import asyncio
@@ -94,7 +95,8 @@ def layout(games):
                                        ("bot-commands", "text", None)]),
             ("ADMIN", "admin", [("studio-stats", "text", "stats"), ("vesper-log", "text", "log")])]
     for game in games:
-        cats.append((game.upper(), game, [("media", "text", None), ("chat", "text", None), ("questions", "text", None),
+        cats.append((game.upper(), game, [("announcements", "news", f"announce:{game}"),
+                                          ("media", "text", None), ("chat", "text", None), ("questions", "text", None),
                                           ("suggestions", "forum", None), ("bug-report", "forum", None),
                                           ("top-suggestions", "hidden", None)]))  # staff only
     return cats
@@ -220,7 +222,11 @@ class FSBot(discord.Client):
         self.db.commit()
 
     def channel(self, key):
-        return self.get_channel(OVERRIDES[key] or int(self.get(f"channel:{key}") or 0))
+        return self.get_channel(OVERRIDES.get(key) or int(self.get(f"channel:{key}") or 0))
+
+    def announce_channel(self, game_name=None):
+        """The game's #announcements if it has one, else the studio-wide #announcements."""
+        return (game_name and self.channel(f"announce:{game_name}")) or self.channel("announce")
 
     async def ensure_layout(self, guild):
         """Create missing roles, categories and channels; returns notes about what it made.
@@ -249,13 +255,16 @@ class FSBot(discord.Client):
                 notes.append(f"Created category {cat_name}")
             for name, kind, key in channels:
                 ch = guild.get_channel(OVERRIDES.get(key) or int(self.get(f"channel:{key}") or 0)) if key else None
-                # bot channels are unique server-wide; game channels ("chat", ...) only within their category
-                ch = ch or discord.utils.get(guild.channels if key else cat.channels, name=name)
+                ch = ch or discord.utils.get(cat.channels, name=name)  # names repeat across game categories
                 if not ch:
                     ow = dict(cat.overwrites)  # start from the category's lock, then add the channel's own
-                    if kind in ("readonly", "news"):
-                        ow[everyone] = discord.PermissionOverwrite(send_messages=False)
+                    if kind in ("readonly", "news"):  # add "no posting" on top of the category's view lock
+                        ow[everyone] = discord.PermissionOverwrite.from_pair(*ow.get(everyone, discord.PermissionOverwrite()).pair())
+                        ow[everyone].update(send_messages=False)
                         ow[guild.me] = bot_can
+                    if kind == "news":  # staff post announcements too
+                        for r in ("Moderator", "Dev"):
+                            ow[role[r]] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
                     if kind == "hidden":  # staff only, even inside a game category
                         ow = {everyone: hide, guild.me: bot_can, role["Moderator"]: see, role["Dev"]: see}
                     if kind == "forum":
@@ -390,8 +399,9 @@ class FSBot(discord.Client):
         self.put("status_message", (await channel.send(view=view)).id)
 
     async def check_milestones(self, games):
-        channel = self.channel("announce")
+        names = {uid: name for name, uid in GAMES.items()}
         for uid, game in games.items():
+            channel = self.announce_channel(names.get(uid))
             reached, key = milestones_passed(game["visits"]), f"milestone:{uid}"
             last = self.get(key)
             if last is None:  # first sight of this game: remember, don't announce the backlog
@@ -463,16 +473,17 @@ class AnnounceModal(discord.ui.Modal, title="New announcement"):
     heading = discord.ui.TextInput(label="Title", max_length=100)
     message = discord.ui.TextInput(label="Message", style=discord.TextStyle.paragraph, max_length=1800)
 
-    def __init__(self, bot, universe_id):
+    def __init__(self, bot, game_name):
         super().__init__()
-        self.bot, self.universe_id = bot, universe_id
+        self.bot, self.game_name = bot, game_name
 
     async def on_submit(self, interaction):
-        channel = self.bot.channel("announce")
+        channel = self.bot.announce_channel(self.game_name)
         if not channel:
             return await interaction.response.send_message("No #announcements channel yet.", ephemeral=True)
         await interaction.response.defer(ephemeral=True)
-        game = (await self.bot.fetch_games()).get(self.universe_id) if self.universe_id else None
+        uid = GAMES.get(self.game_name, 0)
+        game = (await self.bot.fetch_games()).get(uid) if uid else None
         msg = await channel.send(view=announce_card(self.heading.value, self.message.value, game))
         await publish(msg)
         await interaction.followup.send(f"Posted: {msg.jump_url}", ephemeral=True)
@@ -491,11 +502,13 @@ def register_commands(bot):
         row = (await bot.fetch_games()).get(uid)
         await interaction.followup.send(view=stats_card(game, row, await bot.fetch_icon(uid)))
 
-    @bot.tree.command(description="Post an announcement (with a Play button if you pick a game)")
+    @bot.tree.command(description="Post an announcement: studio-wide, or in a game's own #announcements")
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.autocomplete(game=game_choices)
     async def announce(interaction: discord.Interaction, game: str = ""):
-        await interaction.response.send_modal(AnnounceModal(bot, GAMES.get(game, 0)))
+        if game and game not in GAMES:
+            return await interaction.response.send_message("Unknown game.", ephemeral=True)
+        await interaction.response.send_modal(AnnounceModal(bot, game or None))
 
     @bot.tree.command(name="digest-now", description="Post the analytics digest now")
     @app_commands.default_permissions(manage_guild=True)
