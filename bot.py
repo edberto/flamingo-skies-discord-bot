@@ -354,6 +354,9 @@ class FSBot(discord.Client):
         ids = {k: (self.channel(k).id if self.channel(k) else 0) for k in ("announce", "status", "botcmds")}
         ids["rules"] = rules.id if rules else 0
         text = fill_mentions((APP_DIR / file).read_text(encoding="utf-8"), ids)
+        if not ch.permissions_for(guild.me).send_messages:  # e.g. Discord's read-only #rules: let Vesper post there
+            await ch.set_permissions(guild.me, view_channel=True, send_messages=True, read_message_history=True,
+                                     reason="Vesper: post rules/welcome")
         for mid in json.loads(self.get(f"post:{name}") or "[]"):  # remove the old copy
             try:
                 await (await ch.fetch_message(mid)).delete()
@@ -639,7 +642,12 @@ def register_commands(bot):
 
     async def post(interaction, name):
         await interaction.response.defer(ephemeral=True)
-        await interaction.followup.send(await bot.post_doc(interaction.guild, name), ephemeral=True)
+        try:
+            result = await bot.post_doc(interaction.guild, name)
+        except discord.HTTPException as e:
+            log.exception("post %s failed", name)
+            result = f"Couldn't post: `{e}`"
+        await interaction.followup.send(result, ephemeral=True)
 
     @bot.tree.command(name="post-rules", description="Post rules.md in #rules (replaces the previous copy)")
     @app_commands.default_permissions(manage_guild=True)
