@@ -115,7 +115,7 @@ def layout(games):
     """[(category, who sees it, [(channel, kind, key)])]. Who: None = everyone, "admin" = admins only,
     a game name = that game's role, its experts, Moderator and Dev.
     Kinds: text, readonly, news, forum, voice, hidden (admins, Moderator and Dev only)."""
-    cats = [("🌅 FLAMINGO SKIES", None, [("📢・announcements", "news", "announce"),
+    cats = [("🌅 FLAMINGO SKIES PIER", None, [("📢・announcements", "news", "announce"),
                                           ("🎮・playing-now", "readonly", "status"),
                                           ("🤖・bot-commands", "text", "botcmds"), (HUB, "voice", None)]),
             ("🔒 ADMIN", "admin", [("📊・studio-stats", "text", "stats"), ("🌟・vesper-log", "text", "log")])]

@@ -36,7 +36,7 @@ class Guild:
     features, default_role, me = ["COMMUNITY"], "everyone", "vesper"
     def __init__(self):
         self.made, self.roles = [], [Obj(1, "Moderator")]  # Moderator already exists
-        hub = Obj(3, "FLAMINGO SKIES"); hub.channels = [Obj(2, "announcements", category_id=3)]  # old plain names
+        hub = Obj(3, "FLAMINGO SKIES PIER"); hub.channels = [Obj(2, "announcements", category_id=3)]  # old plain names
         self.categories, self.channels = [hub], list(hub.channels)
     def get_channel(self, cid): return next((c for c in self.channels if c.id == cid), None)
     def _new(self, kind, name, category=None, overwrites=None, **kw):
@@ -64,7 +64,7 @@ async def check_layout():
     assert ("role", "Moderator") not in made and {("role", "Dev"), ("role", "Huss game"), ("role", "huss-game-expert"),
                                                    ("role", "Flamingo"), ("role", "Tester")} <= made
     hub, old = g.categories[0], g.channels[0]  # existing plain-named ones were reused and decorated, not duplicated
-    assert vesper.get("channel:announce") == "2" and hub.name == "🌅 FLAMINGO SKIES" and old.name == "📢・announcements"
+    assert vesper.get("channel:announce") == "2" and hub.name == "🌅 FLAMINGO SKIES PIER" and old.name == "📢・announcements"
     assert [o.name for o in g.made if o.kind == "category"] == ["🔒 ADMIN", "🎮 HUSS GAME", "🎮 MAHJONG MAYHEM"]
     assert [e[1] for c in hub.channels for e in c.edits if e[1] is not None] == [0, 1, 2, 3]  # put in layout order
     game_news = [o for o in g.made if o.name == "📢・announcements"]
@@ -73,7 +73,7 @@ async def check_layout():
     assert {("category", "🎮 MAHJONG MAYHEM"), ("role", "mahjong-mayhem-expert"), ("role", "Mahjong Mayhem")} <= made
     assert {("text", "🤖・bot-commands"), ("forum", "💡・suggestions"), ("forum", "🐛・bug-report"), ("text", "🖼️・media")} <= made
     by = {b.plain(o.name): o for o in g.made}
-    by["FLAMINGO SKIES"] = hub
+    by["FLAMINGO SKIES PIER"] = hub
     role = {r.name: r for r in g.roles}
     hide = by["HUSS GAME"].overwrites
     assert hide["everyone"].view_channel is False and hide["vesper"].view_channel is True

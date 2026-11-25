@@ -1,13 +1,13 @@
 # flamingo-skies-discord-bot
 
-Discord bot for the Flamingo Skies server. Runs on the same GCP e2-micro as the Icarus clan bot, as a separate systemd service.
+Discord bot for the Flamingo Skies Pier server. Runs on the same GCP e2-micro as the Icarus clan bot, as a separate systemd service.
 
 ## What it does
 - **Builds the server layout** on every start, creating only what's missing (it never edits or deletes):
 
   | Category | Who sees it | Channels |
   |---|---|---|
-  | 🌅 FLAMINGO SKIES | Everyone | `#announcements` (studio-wide; Announcement channel, needs Community), `#playing-now` (read-only), `#bot-commands` (for fun bots) |
+  | 🌅 FLAMINGO SKIES PIER | Everyone | `#announcements` (studio-wide; Announcement channel, needs Community), `#playing-now` (read-only), `#bot-commands` (for fun bots) |
   | 🔒 ADMIN | Admins only | `#studio-stats`, `#vesper-log` |
   | One per game, e.g. HUSS GAME | That game's role, `<game>-expert`, Moderator, Dev | `#announcements` (that game's news), `#media`, `#chat`, `#questions`, `#suggestions` (forum), `#bug-report` (forum), `#top-suggestions` (Moderator, Dev and admins only) |
 
@@ -15,7 +15,7 @@ Discord bot for the Flamingo Skies server. Runs on the same GCP e2-micro as the 
   In every `#announcements`, only admins, Moderator, Dev and Vesper can post. To add a game later, add it to `GAMES` and restart.
 
   Roles: **Moderator** and **Dev** (moderation powers but not Administrator, so they can't see ADMIN), **Tester**, **Flamingo**, and per game a role named after the game (handed out by Onboarding) plus `<game>-expert`. Tester, Flamingo and the game roles have member-level permissions.
-- **Join-to-create voice rooms** (same as the clan bot): FLAMINGO SKIES and every game category get a "Join me to create" voice channel. Joining it makes you your own room in that category (you can rename it or set a user limit); it's deleted when the last person leaves. Game rooms stay visible only to that game's players.
+- **Join-to-create voice rooms** (same as the clan bot): FLAMINGO SKIES PIER and every game category get a "Join me to create" voice channel. Joining it makes you your own room in that category (you can rename it or set a user limit); it's deleted when the last person leaves. Game rooms stay visible only to that game's players.
 - **`/post-rules`, `/post-welcome`** (Manage Server): post `rules.md` in #rules and `welcome.md` (pinned) in #general. Edit the file, push, run the command again: Vesper deletes its previous copy first. `{#announce}`, `{#status}`, `{#botcmds}`, `{#rules}` become clickable channel mentions.
 - **`#vesper-log`**: "Started, version `abc1234 ...`" on every start, channels it created, auto-update problems (skipped or rolled-back commits) and digest failures. Same idea as the clan bot's `#bot-commands`.
 - **Nightly backup** at 03:00 Asia/Jakarta: `fs.db` → `/opt/fsbot/backups/fs-Mon.db` … `fs-Sun.db` (7 days).

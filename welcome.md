@@ -1,4 +1,4 @@
-🌅 **Hey flock, welcome to Flamingo Skies!**
+🌅 **Hey flock, welcome to Flamingo Skies Pier!**
 We're an indie studio making Roblox games, starting with **Huss game** and **Mahjong Mayhem**.
 
 🎮 Pick your games in **Channels & Roles** at the top of the channel list to unlock their channels.

@@ -1,4 +1,4 @@
-# 🌅 Welcome to Flamingo Skies
+# 🌅 Welcome to Flamingo Skies Pier
 A small indie studio making Roblox games. Keep it friendly so everyone enjoys the sky. 🦩
 
 **1. Be kind.** No harassment, hate speech, slurs or personal attacks. Disagree with ideas, not people.
