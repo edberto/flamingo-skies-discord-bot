@@ -7,10 +7,11 @@ Discord bot for the Flamingo Skies server. Runs on the same GCP e2-micro as the 
 
   | Category | Who sees it | Channels |
   |---|---|---|
-  | FLAMINGO SKIES | Everyone | `#announcements` (studio-wide; Announcement channel, needs Community), `#playing-now` (read-only), `#bot-commands` (for fun bots) |
-  | ADMIN | Admins only | `#studio-stats`, `#vesper-log` |
+  | 🌅 FLAMINGO SKIES | Everyone | `#announcements` (studio-wide; Announcement channel, needs Community), `#playing-now` (read-only), `#bot-commands` (for fun bots) |
+  | 🔒 ADMIN | Admins only | `#studio-stats`, `#vesper-log` |
   | One per game, e.g. HUSS GAME | That game's role, `<game>-expert`, Moderator, Dev | `#announcements` (that game's news), `#media`, `#chat`, `#questions`, `#suggestions` (forum), `#bug-report` (forum), `#top-suggestions` (Moderator, Dev and admins only) |
 
+  Channel names are decorated (`💬・chat`, `🎮 HUSS GAME`); Vesper matches names with the emoji ignored, so plain-named channels from older versions are renamed once and put in order, and channels you rename yourself are left alone.
   In every `#announcements`, only admins, Moderator, Dev and Vesper can post. To add a game later, add it to `GAMES` and restart.
 
   Roles: **Moderator** and **Dev** (moderation powers but not Administrator, so they can't see ADMIN), **Tester**, **Flamingo**, and per game a role named after the game (handed out by Onboarding) plus `<game>-expert`. Tester, Flamingo and the game roles have member-level permissions.

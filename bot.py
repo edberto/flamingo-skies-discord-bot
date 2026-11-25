@@ -17,6 +17,7 @@ A game whose universe ID is 0 is a placeholder: it shows as "not published yet" 
 import asyncio
 import logging
 import os
+import re
 import sqlite3
 import subprocess
 import time
@@ -73,7 +74,21 @@ def parse_games(raw):
 
 
 GAMES = parse_games(os.environ.get("GAMES", "Huss game:0"))
-HUB = "Join me to create"
+HUB = "🔊 Join me to create"
+
+
+def plain(name):
+    """'💬・chat' -> 'chat', '🎮 HUSS GAME' -> 'HUSS GAME': the name without its emoji decoration."""
+    return re.sub(r"^[^\w]+", "", name.split("・", 1)[-1]).strip()
+
+
+def same(a, b):
+    """Names match when they're equal once decoration and case are ignored."""
+    return plain(a).lower() == plain(b).lower()
+
+
+def find(items, name):
+    return next((c for c in items if same(c.name, name)), None)
 
 # "Admin privileges except the admin category": everything a moderator needs, but not Administrator
 # (Administrator would bypass the ADMIN category's lock). The bot must hold these itself to hand them out.
@@ -95,15 +110,16 @@ def layout(games):
     """[(category, who sees it, [(channel, kind, key)])]. Who: None = everyone, "admin" = admins only,
     a game name = that game's role, its experts, Moderator and Dev.
     Kinds: text, readonly, news, forum, voice, hidden (admins, Moderator and Dev only)."""
-    cats = [("FLAMINGO SKIES", None, [("announcements", "news", "announce"), ("playing-now", "readonly", "status"),
-                                       ("bot-commands", "text", None), (HUB, "voice", None)]),
-            ("ADMIN", "admin", [("studio-stats", "text", "stats"), ("vesper-log", "text", "log")])]
+    cats = [("🌅 FLAMINGO SKIES", None, [("📢・announcements", "news", "announce"),
+                                          ("🎮・playing-now", "readonly", "status"),
+                                          ("🤖・bot-commands", "text", None), (HUB, "voice", None)]),
+            ("🔒 ADMIN", "admin", [("📊・studio-stats", "text", "stats"), ("🌟・vesper-log", "text", "log")])]
     for game in games:
-        cats.append((game.upper(), game, [("announcements", "news", f"announce:{game}"),
-                                          ("media", "text", None), ("chat", "text", None), ("questions", "text", None),
-                                          ("suggestions", "forum", None), ("bug-report", "forum", None),
-                                          ("top-suggestions", "hidden", None),  # staff only
-                                          (HUB, "voice", None)]))
+        cats.append((f"🎮 {game.upper()}", game, [
+            ("📢・announcements", "news", f"announce:{game}"), ("🖼️・media", "text", None), ("💬・chat", "text", None),
+            ("❓・questions", "text", None), ("💡・suggestions", "forum", None), ("🐛・bug-report", "forum", None),
+            ("🏆・top-suggestions", "hidden", None),  # staff only
+            (HUB, "voice", None)]))
     return cats
 
 
@@ -250,7 +266,10 @@ class FSBot(discord.Client):
                                                      reason="Vesper setup")
                 notes.append(f"Created role {name}")
         for cat_name, who, channels in layout(GAMES):
-            cat = discord.utils.get(guild.categories, name=cat_name)
+            cat = find(guild.categories, cat_name)
+            if cat and cat.name == plain(cat_name):  # still the old plain name: decorate it once
+                await cat.edit(name=cat_name, reason="Vesper: prettier names")
+                notes.append(f"Renamed {plain(cat_name)} to {cat_name}")
             if not cat:
                 ow = {}
                 if who:  # locked category: hidden from everyone, then opened to the right roles
@@ -260,9 +279,14 @@ class FSBot(discord.Client):
                         ow[role[r]] = see
                 cat = await guild.create_category(cat_name, overwrites=ow, reason="Vesper setup")
                 notes.append(f"Created category {cat_name}")
+            renamed, ordered = False, []
             for name, kind, key in channels:
                 ch = guild.get_channel(OVERRIDES.get(key) or int(self.get(f"channel:{key}") or 0)) if key else None
-                ch = ch or discord.utils.get(cat.channels, name=name)  # names repeat across game categories
+                ch = ch or find(cat.channels, name)  # names repeat across game categories
+                if ch and ch.name == plain(name) and ch.name != name:  # old plain name: decorate it once
+                    await ch.edit(name=name, reason="Vesper: prettier names")
+                    notes.append(f"Renamed {plain(name)} to {name} in {cat_name}")
+                    renamed = True
                 if not ch:
                     ow = dict(cat.overwrites)  # start from the category's lock, then add the channel's own
                     if kind in ("readonly", "news"):  # add "no posting" on top of the category's view lock
@@ -287,6 +311,11 @@ class FSBot(discord.Client):
                     notes.append(f"Created {'' if kind == 'voice' else '#'}{name} in {cat_name}")
                 if key:
                     self.put(f"channel:{key}", ch.id)
+                ordered.append(ch)
+            if renamed:  # one-time tidy with the rename: put the category's channels in layout order
+                for i, ch in enumerate(ordered):
+                    if ch.category_id == cat.id:
+                        await ch.edit(position=i, reason="Vesper: channel order")
         for note in notes:
             log.info(note)
         return notes
@@ -407,7 +436,8 @@ class FSBot(discord.Client):
         if before.channel and before.channel.id in self.room_ids() and not before.channel.members:
             await self.drop_room(before.channel, before.channel.id)
         hub = after.channel
-        if hub and hub.name == HUB and hub.category and hub.category.name in {c for c, _, _ in layout(GAMES)}:
+        if (hub and same(hub.name, HUB) and hub.category
+                and any(same(hub.category.name, c) for c, _, _ in layout(GAMES))):
             # hub-hopping would make the bot create/delete channels nonstop and hit Discord's rate limits
             if time.monotonic() - self.last_room.get(member.id, -60) < 15:
                 return await member.move_to(None)
