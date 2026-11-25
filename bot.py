@@ -11,10 +11,12 @@
   and a post in that game's #announcements when a game passes a visit milestone (1K, 2.5K, 5K, 10K, ...).
 - Daily at DIGEST_HOUR Asia/Jakarta: private analytics digest (Open Cloud Analytics, Beta) in #studio-stats.
 - /stats: a game's card. /announce (Manage Server): studio-wide post, or with a game: in that game's
-  #announcements with a Play button. /digest-now (Manage Server).
+  #announcements with a Play button. /digest-now, /post-rules, /post-welcome (Manage Server):
+  the last two post rules.md / welcome.md and replace their previous copy.
 A game whose universe ID is 0 is a placeholder: it shows as "not published yet" and is skipped by the loops.
 """
 import asyncio
+import json
 import logging
 import os
 import re
@@ -44,7 +46,10 @@ GUILD_ID = int(os.environ.get("GUILD_ID", "0"))
 # Channels the bot itself posts in: key -> optional ID override from .env (else found by name / created)
 OVERRIDES = {"status": int(os.environ.get("STATUS_CHANNEL_ID") or 0),
              "announce": int(os.environ.get("ANNOUNCE_CHANNEL_ID") or 0),
-             "stats": int(os.environ.get("STATS_CHANNEL_ID") or 0), "log": 0}
+             "stats": int(os.environ.get("STATS_CHANNEL_ID") or 0), "log": 0, "botcmds": 0}
+APP_DIR = Path(__file__).resolve().parent
+# /post-rules and /post-welcome: file in the repo -> channel (Discord's own #rules / #general), pinned?
+POSTS = {"rules": ("rules.md", "rules", False), "welcome": ("welcome.md", "general", True)}
 ANALYTICS_KEY = os.environ.get("ROBLOX_ANALYTICS_KEY", "")
 DIGEST_HOUR = int(os.environ.get("DIGEST_HOUR", "9"))
 DB_PATH = Path(os.environ.get("DB_PATH", "fs.db"))
@@ -112,7 +117,7 @@ def layout(games):
     Kinds: text, readonly, news, forum, voice, hidden (admins, Moderator and Dev only)."""
     cats = [("🌅 FLAMINGO SKIES", None, [("📢・announcements", "news", "announce"),
                                           ("🎮・playing-now", "readonly", "status"),
-                                          ("🤖・bot-commands", "text", None), (HUB, "voice", None)]),
+                                          ("🤖・bot-commands", "text", "botcmds"), (HUB, "voice", None)]),
             ("🔒 ADMIN", "admin", [("📊・studio-stats", "text", "stats"), ("🌟・vesper-log", "text", "log")])]
     for game in games:
         cats.append((f"🎮 {game.upper()}", game, [
@@ -221,6 +226,25 @@ def running_version():
         return None
 
 
+def fill_mentions(text, ids):
+    """'{#announce}' -> '<#123>' for every known channel key; unknown keys stay as plain text."""
+    for key, cid in ids.items():
+        text = text.replace("{#" + key + "}", f"<#{cid}>" if cid else f"#{key}")
+    return text
+
+
+def split_message(text, limit=1900):
+    """Split at blank lines so each piece fits in one Discord message."""
+    parts, cur = [], ""
+    for block in text.strip().split("\n\n"):
+        if cur and len(cur) + 2 + len(block) > limit:
+            parts.append(cur)
+            cur = block
+        else:
+            cur = f"{cur}\n\n{block}" if cur else block
+    return parts + [cur] if cur else parts
+
+
 def open_db(path=DB_PATH):
     db = sqlite3.connect(path)
     db.execute("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT)")
@@ -319,6 +343,32 @@ class FSBot(discord.Client):
         for note in notes:
             log.info(note)
         return notes
+
+    async def post_doc(self, guild, name):
+        """Post rules.md / welcome.md into its channel, replacing Vesper's previous copy."""
+        file, channel_name, pin = POSTS[name]
+        ch = (guild.rules_channel if name == "rules" else None) or find(guild.text_channels, channel_name)
+        if not ch:
+            return f"No #{channel_name} channel found."
+        rules = guild.rules_channel or find(guild.text_channels, "rules")
+        ids = {k: (self.channel(k).id if self.channel(k) else 0) for k in ("announce", "status", "botcmds")}
+        ids["rules"] = rules.id if rules else 0
+        text = fill_mentions((APP_DIR / file).read_text(encoding="utf-8"), ids)
+        for mid in json.loads(self.get(f"post:{name}") or "[]"):  # remove the old copy
+            try:
+                await (await ch.fetch_message(mid)).delete()
+            except discord.HTTPException:
+                pass
+        msgs = [await ch.send(part, suppress_embeds=True, allowed_mentions=discord.AllowedMentions.none())
+                for part in split_message(text)]
+        self.put(f"post:{name}", json.dumps([m.id for m in msgs]))
+        note = ""
+        if pin:
+            try:
+                await msgs[0].pin()
+            except discord.HTTPException:
+                note = " (couldn't pin it: give Vesper Pin Messages, or pin it yourself)"
+        return f"Posted in {ch.mention}{note}: {msgs[0].jump_url}"
 
     async def bot_log(self, text):
         """Post to #vesper-log; falls back to the server log if the channel is missing."""
@@ -586,6 +636,20 @@ def register_commands(bot):
         if game and game not in GAMES:
             return await interaction.response.send_message("Unknown game.", ephemeral=True)
         await interaction.response.send_modal(AnnounceModal(bot, game or None))
+
+    async def post(interaction, name):
+        await interaction.response.defer(ephemeral=True)
+        await interaction.followup.send(await bot.post_doc(interaction.guild, name), ephemeral=True)
+
+    @bot.tree.command(name="post-rules", description="Post rules.md in #rules (replaces the previous copy)")
+    @app_commands.default_permissions(manage_guild=True)
+    async def post_rules(interaction: discord.Interaction):
+        await post(interaction, "rules")
+
+    @bot.tree.command(name="post-welcome", description="Post and pin welcome.md in #general (replaces the previous copy)")
+    @app_commands.default_permissions(manage_guild=True)
+    async def post_welcome(interaction: discord.Interaction):
+        await post(interaction, "welcome")
 
     @bot.tree.command(name="digest-now", description="Post the analytics digest now")
     @app_commands.default_permissions(manage_guild=True)

@@ -1,7 +1,7 @@
 """Run: python3 test_bot.py  (auto-update only deploys a commit if this passes)"""
 import asyncio
 
-from bot import (FSBot, announce_card, digest_text, fmt, latest_point, milestones_passed, open_db, parse_games, short,
+from bot import (FSBot, announce_card, fill_mentions, split_message, digest_text, fmt, latest_point, milestones_passed, open_db, parse_games, short,
                  stats_card, status_card)
 
 assert parse_games("Huss game:0, Other Game: 123") == {"Huss game": 0, "Other Game": 123}
@@ -92,6 +92,11 @@ async def check_layout():
     hubs = [o for o in g.made if o.kind == "voice"]
     assert [h.name for h in hubs] == ["🔊 Join me to create"] * 3  # hub category + 2 games
     assert notes and await vesper.ensure_layout(g) == []  # second run changes nothing
+assert fill_mentions("see {#announce} and {#rules}", {"announce": 5, "rules": 0}) == "see <#5> and #rules"
+assert split_message("a\n\nb") == ["a\n\nb"] and split_message("") == []
+parts = split_message("\n\n".join(["x" * 1000] * 3))
+assert len(parts) == 3 and all(len(p) <= 1900 for p in parts)
+assert len(open("rules.md", encoding="utf-8").read()) < 1900 and "{#" in open("welcome.md", encoding="utf-8").read()
 asyncio.run(check_layout())
 
 

@@ -16,6 +16,7 @@ Discord bot for the Flamingo Skies server. Runs on the same GCP e2-micro as the 
 
   Roles: **Moderator** and **Dev** (moderation powers but not Administrator, so they can't see ADMIN), **Tester**, **Flamingo**, and per game a role named after the game (handed out by Onboarding) plus `<game>-expert`. Tester, Flamingo and the game roles have member-level permissions.
 - **Join-to-create voice rooms** (same as the clan bot): FLAMINGO SKIES and every game category get a "Join me to create" voice channel. Joining it makes you your own room in that category (you can rename it or set a user limit); it's deleted when the last person leaves. Game rooms stay visible only to that game's players.
+- **`/post-rules`, `/post-welcome`** (Manage Server): post `rules.md` in #rules and `welcome.md` (pinned) in #general. Edit the file, push, run the command again: Vesper deletes its previous copy first. `{#announce}`, `{#status}`, `{#botcmds}`, `{#rules}` become clickable channel mentions.
 - **`#vesper-log`**: "Started, version `abc1234 ...`" on every start, channels it created, auto-update problems (skipped or rolled-back commits) and digest failures. Same idea as the clan bot's `#bot-commands`.
 - **Nightly backup** at 03:00 Asia/Jakarta: `fs.db` → `/opt/fsbot/backups/fs-Mon.db` … `fs-Sun.db` (7 days).
 - **Live "Playing now" card** in `#playing-now`, edited every 5 minutes (one message, never spams).
