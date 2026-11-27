@@ -121,7 +121,8 @@ def layout(games):
             ("🔒 ADMIN", "admin", [("📊・studio-stats", "text", "stats"), ("🌟・vesper-log", "text", "log")])]
     for game in games:
         cats.append((f"🎮 {game.upper()}", game, [
-            ("📢・announcements", "news", f"announce:{game}"), ("🖼️・media", "text", None), ("💬・chat", "text", None),
+            ("📢・announcements", "news", f"announce:{game}"), ("🎟️・codes", "news", None),  # staff post codes
+            ("🖼️・media", "text", None), ("💬・chat", "text", None),
             ("❓・questions", "text", None), ("💡・suggestions", "forum", None), ("🐛・bug-report", "forum", None),
             ("🏆・top-suggestions", "hidden", None),  # staff only
             (HUB, "voice", None)]))
@@ -333,10 +334,11 @@ class FSBot(discord.Client):
                         if kind == "news" and not news:
                             notes.append(f"#{name} is a normal channel: turn on Community, then make it an Announcement channel")
                     notes.append(f"Created {'' if kind == 'voice' else '#'}{name} in {cat_name}")
+                    renamed = True  # re-sort below so new channels land in layout order
                 if key:
                     self.put(f"channel:{key}", ch.id)
                 ordered.append(ch)
-            if renamed:  # one-time tidy with the rename: put the category's channels in layout order
+            if renamed:  # after a rename or an addition: put the category's channels in layout order
                 for i, ch in enumerate(ordered):
                     if ch.category_id == cat.id:
                         await ch.edit(position=i, reason="Vesper: channel order")
